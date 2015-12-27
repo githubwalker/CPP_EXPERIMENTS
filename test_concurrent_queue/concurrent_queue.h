@@ -37,6 +37,7 @@ namespace CONC
         std::atomic< TNode<TYPE> * > ptail_;
         std::atomic_size_t size_;
         std::atomic_size_t pop_collision_count_;
+        std::atomic_size_t push_collision_count_0_;
         std::atomic_size_t push_collision_count_;
 
     public:
@@ -47,6 +48,7 @@ namespace CONC
             size_ = 0;
             pop_collision_count_ = 0;
             push_collision_count_ = 0;
+            push_collision_count_0_ = 0;
         }
 
         ~conc_queue()
@@ -116,6 +118,7 @@ namespace CONC
                     {
                         // collision happened
                         pop_collision_count_ ++;
+                        push_collision_count_0_ ++;
                     }
                 }
                 else
@@ -142,6 +145,11 @@ namespace CONC
         std::size_t getPopCollisionCount() const 
         { 
             return pop_collision_count_.load(); 
+        }
+        
+        std::size_t getPopCollisionCount0() const 
+        {
+            return push_collision_count_0_.load();
         }
 
         std::size_t size() const { return size_.load(); }

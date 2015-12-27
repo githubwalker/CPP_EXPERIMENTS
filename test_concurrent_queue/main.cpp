@@ -221,6 +221,7 @@ void testConcurrentQueue( parsed_params& pp )
     std::cerr << "[INFO] " << pp.nPushThreads * pp.nIterations << " total numbers expected to be handled" << std::endl;
     std::cerr << "[INFO] push collision counter :" << queue->getPushCollisionCount() << std::endl;
     std::cerr << "[INFO] pop collision counter :" << queue->getPopCollisionCount() << std::endl;
+    std::cerr << "[INFO] pop collision counter/0 :" << queue->getPopCollisionCount0() << std::endl;
 
     double nPushCollisionsPerc = 100.0 *  
             ((double)queue->getPushCollisionCount()) / ((double)pp.nPushThreads * (double)pp.nIterations);
@@ -228,8 +229,13 @@ void testConcurrentQueue( parsed_params& pp )
     double nPopCollisionsPerc = 100.0 * 
             ((double)queue->getPopCollisionCount()) / ((double)pp.nPopThreads * (double)pp.nIterations);
 
+    double nPopCollisionsPerc0 = 100.0 * 
+            ((double)queue->getPopCollisionCount0()) / ((double)pp.nPopThreads * (double)pp.nIterations);
+    
+    
     std::cerr << "[INFO] push collision percentage :" << nPushCollisionsPerc << std::endl;
     std::cerr << "[INFO] pop collision percentage :" << nPopCollisionsPerc << std::endl;
+    std::cerr << "[INFO] pop collision percentage0 :" << nPopCollisionsPerc0 << std::endl;
 
 
     if ( pp.bCheckOutput )
