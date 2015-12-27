@@ -99,7 +99,10 @@ namespace CONC
                     if ( save_phead != nullptr )
                     {
                         if ( save_phead->pnext == nullptr )
+                        {
+                            phead_.store(save_phead);
                             return false; // queue is considered to be empty
+                        }
 
                         phead_.store( save_phead->pnext ) ;
                         if (pval)
@@ -112,13 +115,13 @@ namespace CONC
                     else
                     {
                         // collision happened
-                        pop_collision_count_ --;
+                        pop_collision_count_ ++;
                     }
                 }
                 else
                 {
                     // collision happened
-                    pop_collision_count_ --;
+                    pop_collision_count_ ++;
                 }
             }
 
@@ -141,6 +144,7 @@ namespace CONC
             return pop_collision_count_.load(); 
         }
 
+        std::size_t size() const { return size_.load(); }
     };
     
 }
