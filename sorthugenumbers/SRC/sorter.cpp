@@ -5,8 +5,9 @@
 #include <utility>
 #include <vector>
 #include <queue>
-#include <boost/lockfree/queue.hpp>
 #include <boost/filesystem.hpp>
+
+#include <iostream>
 
 #include "sysutils.h"
 
@@ -112,21 +113,17 @@ namespace sorter
 
     };
 
-    void OutputToTemp(boost::lockfree::queue<std::vector<ITEM_TYPE>*>& output_queue, const boost::filesystem::path& tmpdir, std::vector<std::string>& tmpfilenames)
+    void Wite2Temp(const std::vector<ITEM_TYPE>& fetched_item, const boost::filesystem::path& tmpdir, std::vector<std::string>& tmpfilenames)
     {
-        std::vector<ITEM_TYPE> * poutitem = nullptr;
-        while(output_queue.pop(poutitem))
-        {
-            auto fetched_item = std::unique_ptr<std::vector<ITEM_TYPE>>(poutitem);
-            auto temp_filename = tmpdir / boost::filesystem::unique_path();
-            std::ofstream temp;
-            temp.open(temp_filename.native(), std::ios::out | std::ios::binary);
-            tmpfilenames.push_back(temp_filename.native());
+        auto temp_filename = tmpdir / boost::filesystem::unique_path();
+        std::ofstream temp;
+        temp.open(temp_filename.native(), std::ios::out | std::ios::binary);
+        tmpfilenames.push_back(temp_filename.native());
 
-            if (!temp.is_open())
-                throw std::runtime_error(std::string("failed to open temp file ") + temp_filename.native());
-            temp.write((char *)&(*fetched_item.get())[0], fetched_item.get()->size() * sizeof(ITEM_TYPE));
-        }
+        if (!temp.is_open())
+            throw std::runtime_error(std::string("failed to open temp file ") + temp_filename.native());
+        std::cout << "WRITING to file " << temp_filename << std::endl;
+        temp.write((char *)&(fetched_item[0]), fetched_item.size() * sizeof(ITEM_TYPE));
     }
 
     void SortLargeFile(const std::string& input_filename, const std::string& output_filename)
@@ -147,7 +144,7 @@ namespace sorter
         // items total by file size
         auto nitems = (static_cast<std::size_t>(file_size)+sizeof(ITEM_TYPE)-1) / sizeof(ITEM_TYPE);
         // threads total to run
-        auto nthreads = boost::thread::hardware_concurrency();
+        auto nthreads = boost::thread::hardware_concurrency() * 8;
         // items per thread
         auto nitems4thread = static_cast<int64_t>((nitems + nthreads - 1) / nthreads);
         // max items in chunk by free mem (divided by 2)
@@ -171,7 +168,7 @@ namespace sorter
                 throw std::runtime_error( std::string("failed to create directory ") + tmpdir.native() );
         }
 
-        boost::lockfree::queue<std::vector<ITEM_TYPE>*> output_queue(nthreads * 2);
+        std::queue<std::shared_future<std::shared_ptr<std::vector<ITEM_TYPE>>>> qfutures;
 
         // sort chunks
         {
@@ -180,17 +177,32 @@ namespace sorter
 
             while(!(current_buffer = ReadFromFile(in, nitems_in_chunk)).empty())
             {
-                auto pvector = new std::vector<ITEM_TYPE>(std::move(current_buffer));
-                pool.run_task( [pvector, &output_queue]() {
-                    std::sort( pvector->begin(), pvector->end());
-                    while (!output_queue.push(pvector));
-                });
+                std::cout << "READING from file " << input_filename << std::endl;
 
-                OutputToTemp(output_queue, tmpdir, tmpfilenames);
+                auto pvector = std::make_shared<std::vector<ITEM_TYPE>>(std::move(current_buffer));
+                auto fut = pool.run_future(
+                    boost::function<std::shared_ptr<std::vector<ITEM_TYPE>> ()>(
+                    [pvector]() -> std::shared_ptr<std::vector<ITEM_TYPE>> {
+                           std::sort( pvector->begin(), pvector->end());
+                           return pvector;
+                       })
+                );
+
+                qfutures.push(fut);
+
+                while (qfutures.size() > nthreads)
+                {
+                    Wite2Temp(*qfutures.front().get(), tmpdir, tmpfilenames);
+                    qfutures.pop();
+                }
             }
         }
 
-        OutputToTemp(output_queue, tmpdir, tmpfilenames);
+        while (!qfutures.empty())
+        {
+            Wite2Temp(*qfutures.front().get(), tmpdir, tmpfilenames);
+            qfutures.pop();
+        }
 
         // merge chunks
         {
