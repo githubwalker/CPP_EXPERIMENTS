@@ -113,6 +113,41 @@ namespace sorter
 
     };
 
+    class TempWriterWithSync
+    {
+      boost::mutex mut_;
+      boost::filesystem::path tmpdir_;
+      std::vector<std::string>& tmpfilenames_;
+    public:
+      TempWriterWithSync(const TempWriterWithSync&) = delete;
+      TempWriterWithSync& operator=(const TempWriterWithSync&) = delete;
+
+      TempWriterWithSync(
+              boost::filesystem::path tmpdir,
+              std::vector<std::string>& tmpfilenames
+              )
+      :
+        tmpdir_(tmpdir), tmpfilenames_(tmpfilenames)
+      {}
+
+      void Write2Temp(const std::vector<ITEM_TYPE>& fetched_item)
+      {
+          auto temp_filename = tmpdir_ / boost::filesystem::unique_path();
+          std::ofstream temp;
+          temp.open(temp_filename.native(), std::ios::out | std::ios::binary);
+
+          {
+            boost::lock_guard<boost::mutex> lock(mut_);
+            tmpfilenames_.push_back(temp_filename.native());
+          }
+
+          if (!temp.is_open())
+              throw std::runtime_error(std::string("failed to open temp file ") + temp_filename.native());
+          std::cout << "WRITING to file " << temp_filename << std::endl;
+          temp.write((char *)&(fetched_item[0]), fetched_item.size() * sizeof(ITEM_TYPE));
+      }
+    };
+
     void Wite2Temp(const std::vector<ITEM_TYPE>& fetched_item, const boost::filesystem::path& tmpdir, std::vector<std::string>& tmpfilenames)
     {
         auto temp_filename = tmpdir / boost::filesystem::unique_path();
@@ -144,7 +179,7 @@ namespace sorter
         // items total by file size
         auto nitems = (static_cast<std::size_t>(file_size)+sizeof(ITEM_TYPE)-1) / sizeof(ITEM_TYPE);
         // threads total to run
-        auto nthreads = boost::thread::hardware_concurrency() * 8;
+        auto nthreads = boost::thread::hardware_concurrency() * 32;
         // items per thread
         auto nitems4thread = static_cast<int64_t>((nitems + nthreads - 1) / nthreads);
         // max items in chunk by free mem (divided by 2)
@@ -168,7 +203,9 @@ namespace sorter
                 throw std::runtime_error( std::string("failed to create directory ") + tmpdir.native() );
         }
 
-        std::queue<std::shared_future<std::shared_ptr<std::vector<ITEM_TYPE>>>> qfutures;
+        TempWriterWithSync temp_writer(tmpdir, tmpfilenames);
+
+        std::queue<std::shared_future<bool>> qfutures;
 
         // sort chunks
         {
@@ -181,26 +218,25 @@ namespace sorter
 
                 auto pvector = std::make_shared<std::vector<ITEM_TYPE>>(std::move(current_buffer));
                 auto fut = pool.run_future(
-                    boost::function<std::shared_ptr<std::vector<ITEM_TYPE>> ()>(
-                    [pvector]() -> std::shared_ptr<std::vector<ITEM_TYPE>> {
+                    boost::function<bool ()>(
+                    [pvector, &temp_writer]() -> bool {
+                           std::cout << boost::this_thread::get_id() << " SORTING start" << std::endl;
                            std::sort( pvector->begin(), pvector->end());
-                           return pvector;
+                           std::cout << boost::this_thread::get_id() << " SORTING end" << std::endl;
+                           temp_writer.Write2Temp(*pvector);
+                           std::cout << boost::this_thread::get_id() << " WRITING end" << std::endl;
+                           return true;
                        })
                 );
 
                 qfutures.push(fut);
-
-                while (qfutures.size() > nthreads)
-                {
-                    Wite2Temp(*qfutures.front().get(), tmpdir, tmpfilenames);
-                    qfutures.pop();
-                }
             }
         }
 
+        // raise error in this thread if happened in worker
         while (!qfutures.empty())
         {
-            Wite2Temp(*qfutures.front().get(), tmpdir, tmpfilenames);
+            qfutures.front().get();
             qfutures.pop();
         }
 
@@ -217,10 +253,13 @@ namespace sorter
                     readers.push_back(reader);
             }
 
+            std::make_heap(readers.begin(), readers.end(), comparator);
+
             while(!readers.empty())
             {
                 std::pop_heap(readers.begin(), readers.end(), comparator);
                 out.write((char *)&readers.back().GetItemRef(), sizeof(ITEM_TYPE));
+
                 if (!readers.back().ReadNext())
                     readers.pop_back();
                 else
