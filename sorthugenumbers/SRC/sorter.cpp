@@ -148,19 +148,6 @@ namespace sorter
       }
     };
 
-    void Wite2Temp(const std::vector<ITEM_TYPE>& fetched_item, const boost::filesystem::path& tmpdir, std::vector<std::string>& tmpfilenames)
-    {
-        auto temp_filename = tmpdir / boost::filesystem::unique_path();
-        std::ofstream temp;
-        temp.open(temp_filename.native(), std::ios::out | std::ios::binary);
-        tmpfilenames.push_back(temp_filename.native());
-
-        if (!temp.is_open())
-            throw std::runtime_error(std::string("failed to open temp file ") + temp_filename.native());
-        std::cout << "WRITING to file " << temp_filename << std::endl;
-        temp.write((char *)&(fetched_item[0]), fetched_item.size() * sizeof(ITEM_TYPE));
-    }
-
     void SortLargeFile(const std::string& input_filename, const std::string& output_filename)
     {
         const int64_t max_bytes_per_chunck = 128 * 1024 * 1024;
