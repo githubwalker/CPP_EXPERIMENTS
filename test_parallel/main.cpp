@@ -64,6 +64,7 @@ int parallel_sum3(_ittype itbeg, _ittype itend)
     const std::size_t nItems = std::distance(itbeg, itend);
 
     std::vector<std::future<int>> futs;
+    futs.reserve(thcount);
 
     for(std::size_t iThread = 0; iThread < thcount; ++iThread)
     {
@@ -81,48 +82,7 @@ int parallel_sum3(_ittype itbeg, _ittype itend)
             }));
     }
 
-    int sum = 0;
-
-    for(auto & fut : futs)
-        sum += fut.get();
-
-    return sum;
-}
-
-
-// try to make it cache friendly
-template <typename _itemType>
-int parallel_sum4(const std::vector<_itemType>& vc)
-{
-    const std::size_t nBunchSize = 10000000; // 1024 * 1024;
-    const auto thcount = boost::thread::hardware_concurrency() * 2;
-
-    std::vector<std::future<int>> futs;
-
-    for(std::size_t iThread = 0; iThread < thcount; ++iThread)
-    {
-        futs.emplace_back(std::async( [&vc, thcount, iThread]()
-              {
-                  int sum = 0;
-                  std::size_t nItems = vc.size();
-
-                  for(std::size_t iLeft = iThread * nBunchSize; iLeft < nItems; iLeft += nBunchSize * thcount)
-                  {
-                      std::size_t iRight = (std::min)(iLeft + nBunchSize, nItems);
-                      for(std::size_t i = iLeft; i < iRight; i++)
-                           sum += vc[i];
-                  }
-
-                  return sum;
-              }));
-    }
-
-    int sum = 0;
-
-    for(auto & fut : futs)
-        sum += fut.get();
-
-    return sum;
+    return std::accumulate(futs.begin(), futs.end(), 0, [](auto a, auto& b) { return a + b.get(); });
 }
 
 
@@ -189,14 +149,6 @@ void promisses_and_futures()
         val = parallel_sum3(vc.begin(), vc.end());
 
     std::cout << "Time spent in cache-friendly parallel sum (micros): " << ms3.GetMicros() << ", result is: " << val << std::endl;
-
-
-    // parallel_sum4
-    MeasureScope ms4;
-    for(std::size_t i=0; i < nrepeats; i++)
-        val = parallel_sum4(vc);
-
-    std::cout << "Time spent in cache-friendly parallel sum (modified) (micros): " << ms4.GetMicros() << ", result is: " << val << std::endl;
 }
 
 
